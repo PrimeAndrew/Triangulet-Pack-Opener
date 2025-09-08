@@ -1,0 +1,193 @@
+javascript:(async function(){
+  const saveKey = 'autoOpenState';
+  const colors = {
+    "Uncommon": "green",
+    "Rare": "blue",
+    "Epic": "red",
+    "Legendary": "orange",
+    "Chroma": "#ADD8E6",
+    "Mystical": "#9370DB"
+  };
+
+  let collected = {
+    "Uncommon": {},
+    "Rare": {},
+    "Epic": {},
+    "Legendary": {},
+    "Chroma": {},
+    "Mystical": {}
+  };
+
+  let recentUnique = 'NONE';
+  let recentRare = 'NONE';
+  let opened = 0;
+  let logs = [];
+  let timer, packChoice = null, panel;
+
+  function saveState(){
+    localStorage.setItem(saveKey, JSON.stringify({ collected, opened, logs, packChoice }));
+  }
+
+  function loadState(){
+    try {
+      let raw = localStorage.getItem(saveKey);
+      if(!raw) return false;
+      let st = JSON.parse(raw);
+      collected = st.collected || collected;
+      opened = st.opened || 0;
+      logs = st.logs || [];
+      packChoice = st.packChoice || null;
+      return true;
+    } catch(e){ return false; }
+  }
+
+  function viewFullLogs(){
+    let box = document.createElement('div');
+    box.id = 'fullLogs';
+    box.style.cssText = `
+      position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+      width:80%;max-width:400px;height:80%;max-height:600px;
+      padding:20px;background:#222;color:#fff;border-radius:15px;
+      overflow-y:auto;z-index:999999;box-shadow:0 0 20px rgba(0,0,0,.8);
+    `;
+    box.innerHTML = '<h2 style="margin-top:0;text-align:center;text-decoration:underline;">Full History</h2>';
+
+    if(logs.length === 0){
+      box.innerHTML += '<p style="text-align:center;">No items yet.</p>';
+    } else {
+      logs.forEach(i=>{
+        let clr = colors[i.rarity] || 'white';
+        box.innerHTML += `<p style="margin:4px 0;color:${clr}">${i.name} (${i.rarity})</p>`;
+      });
+    }
+
+    let btn = document.createElement('button');
+    btn.innerText = 'Close';
+    btn.style.cssText = 'display:block;margin:20px auto;padding:10px 20px;background:#f44336;color:#fff;border:none;border-radius:8px;cursor:pointer;';
+    btn.onclick = ()=>document.body.removeChild(box);
+    box.appendChild(btn);
+    document.body.appendChild(box);
+  }
+  window.viewFullLogs = viewFullLogs;
+
+  function resetReloadTimer(){
+    clearTimeout(timer);
+    saveState();
+    timer = setTimeout(()=>location.reload(), 60000);
+  }
+
+  async function initAndRun(p){
+    packChoice = p;
+    resetReloadTimer();
+
+    if(!panel){
+      panel = document.createElement('div');
+      panel.style.cssText = `
+        position:absolute;top:10px;right:10px;width:250px;padding:16px;
+        border:2px solid rgba(0,0,0,.6);border-radius:15px;
+        box-shadow:0 0 12px rgba(0,0,0,.75);z-index:1000;
+        display:flex;flex-direction:column;
+      `;
+      panel.classList.add('rainbow-panel');
+      document.body.appendChild(panel);
+
+      // rainbow style
+      let st = document.createElement('style');
+      st.textContent = `
+        @keyframes rainbowMove {
+          0%{background-position:0% 50%}
+          50%{background-position:100% 50%}
+          100%{background-position:0% 50%}
+        }
+        .rainbow-panel{
+          background:linear-gradient(270deg, red, orange, yellow, green, blue, indigo, violet);
+          background-size:1400% 1400%;
+          animation:rainbowMove 10s ease infinite;
+        }
+      `;
+      document.head.appendChild(st);
+    }
+
+    setInterval(()=>{
+      fetch('/api/open',{
+        method:'POST',
+        headers:{
+          "Accept":"application/json",
+          "authorization":triangulet.tokenraw,
+          "Content-Type":"application/json"
+        },
+        body:JSON.stringify({capsule: packChoice})
+      })
+      .then(res=>res.json())
+      .then(r=>{
+        if(!r || !r.trian) return;
+        resetReloadTimer();
+
+        if(r.new) recentUnique = `<span style="color:${colors[r.rarity]}">${r.trian}</span>`;
+        if(r.rarity === 'Chroma' || r.rarity === 'Mystical') recentRare = `<span style="color:${colors[r.rarity]}">${r.trian}</span>`;
+
+        collected[r.rarity][r.trian] = (collected[r.rarity][r.trian]||0)+1;
+        opened++;
+        logs.push({name:r.trian, rarity:r.rarity});
+
+        panel.innerHTML = `
+          <h3 style="color:${colors[r.rarity]}">${r.rarity} ${r.trian} (${collected[r.rarity][r.trian]}x)</h3>
+          <p>RECENT RARE: ${recentRare}</p>
+          <p>RECENT UNIQUE: ${recentUnique}</p>
+          <p>CAPSULES OPENED: ${opened.toLocaleString()}</p>
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <h2 style="margin:3px;text-decoration:underline;">Logs</h2>
+            <button onclick="viewFullLogs()" style="background:#039162;color:#fff;padding:6px 10px;border:none;border-radius:6px;cursor:pointer;">View full logs</button>
+          </div>
+        `;
+
+        let flat = {};
+        Object.keys(collected).forEach(rar=>{
+          Object.keys(collected[rar]).forEach(name=>{
+            flat[name] = (flat[name]||0) + collected[rar][name];
+          });
+        });
+        Object.keys(flat).sort().forEach(name=>{
+          let rar = Object.keys(collected).find(r=>collected[r][name]);
+          let clr = rar ? colors[rar] : 'black';
+          panel.innerHTML += `<p style="margin:0;color:${clr}">${name}: ${flat[name]}x</p>`;
+        });
+
+        if(r.rarity === 'Mystical') location.reload();
+      })
+      .catch(console.error);
+    },100);
+  }
+
+  try {
+    let data = await fetch('/data/trians',{
+      headers:{
+        "Accept":"application/json",
+        "authorization":triangulet.tokenraw,
+        "Content-Type":"application/json"
+      }
+    });
+    let json = await data.json();
+    let packs = json.ValuesnCapsules.map(x=>x.name);
+
+    if(loadState() && packChoice){
+      let np = prompt(`Currently opening: ${packChoice}\nEnter new pack or cancel:\n${packs.join('\n')}`);
+      if(np && packs.includes(np)){
+        alert(`Switching to pack: ${np}`);
+        initAndRun(np);
+      } else {
+        alert(`Continuing with: ${packChoice}`);
+        initAndRun(packChoice);
+      }
+    } else {
+      let sp = prompt(`Enter pack:\n${packs.join('\n')}`);
+      if(!sp) return alert('Cancelled.');
+      if(!packs.includes(sp)) return alert('Invalid pack.');
+      initAndRun(sp);
+    }
+  } catch(err){
+    alert("Error loading packs");
+  }
+
+  console.log("thats for using my opener!\n-PrimeAndrew");
+})();
