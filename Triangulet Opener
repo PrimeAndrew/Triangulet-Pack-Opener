@@ -189,5 +189,5 @@ javascript:(async function(){
     alert("Error loading packs");
   }
 
-  console.log("thats for using my opener!\n-PrimeAndrew");
+  console.log("thanks for using my opener!\n-PrimeAndrew");
 })();
